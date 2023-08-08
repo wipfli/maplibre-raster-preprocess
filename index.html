@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>MapLibre Raster Preprocess</title>
+    <meta property="og:description" content="MapLibre Raster Preprocess" />
+    <meta charset='utf-8'>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel='stylesheet' href='https://unpkg.com/maplibre-gl@3.2.1/dist/maplibre-gl.css' />
+    <script src='https://unpkg.com/maplibre-gl@3.2.1/dist/maplibre-gl.js'></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body,
+        #map {
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <script>
+        maplibregl.addProtocol('custom', (params, callback) => {
+            fetch(params.url.replace('custom://', ''))
+                .then(t => {
+                    if (t.status == 200) {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 256;
+                        canvas.height = 256;
+                        const ctx = canvas.getContext('2d');
+
+                        // Use CSS filters to preprocess the raster tiles
+                        // https://developer.mozilla.org/en-US/docs/Web/CSS/filter
+
+                        // ctx.filter = 'blur(3px)'
+                        // ctx.filter = "invert(100%)"
+                        // ctx.filter = "sepia(90%)"
+
+                        t.blob()
+                            .then(blob => {
+                                const img = new Image();
+                                img.src = URL.createObjectURL(blob);
+
+                                img.onload = function () {
+                                    ctx.drawImage(img, 0, 0, 256, 256);
+                                    URL.revokeObjectURL(img.src);
+
+                                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                                    const data = imageData.data;
+
+                                    for (let i = 0; i < data.length; i += 4) {
+
+                                        // Check if pixel color is rgb(170,211,223) - water bodies in OSM Carto
+                                        if (data[i] === 170 && data[i + 1] === 211 && data[i + 2] === 223) {
+
+                                            // Recolor pixel to purple
+                                            data[i + 0] = 255;
+                                            data[i + 1] = 0;
+                                            data[i + 2] = 255;
+                                        }
+                                    }
+
+                                    ctx.putImageData(imageData, 0, 0);
+                                    canvas.toBlob(newBlob => {
+                                        newBlob.arrayBuffer().then(arr => {
+                                            callback(null, arr, null, null);
+                                        });
+                                    })
+                                }
+                            });
+                    } else {
+                        callback(new Error(`Tile fetch error: ${t.statusText}`));
+                    }
+                })
+                .catch(e => {
+                    callback(new Error(e));
+                });
+            return { cancel: () => { } };
+        });
+        const map = new maplibregl.Map({
+            container: 'map',
+            hash: 'map',
+            style: {
+                'version': 8,
+                'sources': {
+                    'raster-tiles': {
+                        'type': 'raster',
+                        'tiles': ['custom://https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                        'tileSize': 256,
+                        'minzoom': 0,
+                        'maxzoom': 19
+                    }
+                },
+                'layers': [
+                    {
+                        'id': 'my-layer',
+                        'type': 'raster',
+                        'source': 'raster-tiles'
+                    }
+                ]
+            },
+            center: [9, 47],
+            zoom: 12
+        });
+    </script>
+</body>
+
+</html>
